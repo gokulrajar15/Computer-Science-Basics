@@ -17,6 +17,11 @@
 11. [Indexing](#11-indexing)
 12. [Transactions & Concurrency Control](#12-transactions--concurrency-control)
 13. [ER Model (Entity-Relationship)](#13-er-model-entity-relationship)
+14. [Views](#14-views)
+15. [Stored Procedures](#15-stored-procedures)
+16. [Triggers](#16-triggers)
+17. [Sharding](#17-sharding)
+18. [CAP Theorem](#18-cap-theorem)
 
 ---
 
@@ -1076,11 +1081,139 @@ Concurrency means **many transactions running at the same time**. When they touc
 └──────────────────┴──────────────────────────────────────────────┘
 ```
 
+### 12.5 Locking — Optimistic vs Pessimistic
+
+When multiple users try to modify the **same data at the same time**, we need a strategy to prevent conflicts. There are two main approaches:
+
+#### The Concurrency Problem
+
+```
+Flash Sale — Only 1 iPhone left!
+
+Alice reads stock = 1  ──→  "Available! Let me buy it"
+Bob reads stock = 1    ──→  "Available! Let me buy it"
+Alice updates stock = 0 ──→  ✓ Purchased!
+Bob updates stock = -1  ──→  ✗ OVERSOLD! We sold 2 items but had only 1!
+
+Both saw stock=1 BEFORE either updated it.
+Without locking, BOTH transactions succeed → Inventory goes negative!
+```
+
+#### Optimistic Locking
+
+**Assumes conflicts are rare.** Doesn't lock data while reading — instead checks at the time of writing if someone else changed it.
+
+Uses a **version number** (or timestamp) to detect conflicts.
+
+```
+How it works:
+
+Step 1: Alice reads iPhone row → stock=1, version=5
+Step 2: Bob reads iPhone row   → stock=1, version=5
+Step 3: Alice updates:
+        UPDATE Products SET stock=0, version=6
+        WHERE ProductID=101 AND version=5;
+        → version matches (5=5) → ✓ Success! Version becomes 6.
+Step 4: Bob tries to update:
+        UPDATE Products SET stock=0, version=6
+        WHERE ProductID=101 AND version=5;
+        → version DOESN'T match (current is 6, not 5) → ✗ FAIL!
+        → Bob gets an error: "Item was modified. Please retry."
+```
+
+```sql
+-- Optimistic Locking in SQL
+-- Step 1: Read the product with its version
+SELECT stock, version FROM Products WHERE ProductID = 101;
+-- Returns: stock=1, version=5
+
+-- Step 2: Update only if version hasn't changed
+UPDATE Products
+SET stock = stock - 1, version = version + 1
+WHERE ProductID = 101 AND version = 5;
+
+-- If 0 rows affected → someone else changed it → RETRY or show error
+```
+
+```
+Best for:
+- Read-heavy systems (more reads than writes)
+- Low chance of conflicts (e.g., editing a user profile)
+- Short transactions
+```
+
+#### Pessimistic Locking
+
+**Assumes conflicts WILL happen.** Locks the data **immediately when reading** so no one else can touch it until the transaction is done.
+
+```
+How it works:
+
+Step 1: Alice reads iPhone row WITH LOCK → stock=1 🔒
+        → Row is now LOCKED. Nobody else can read/write it.
+Step 2: Bob tries to read the same row → ⏳ BLOCKED! Must wait.
+Step 3: Alice updates stock=0 → COMMIT → 🔓 Lock released.
+Step 4: Bob's read finally goes through → stock=0 → "Out of Stock!"
+        → Bob never even got a chance to buy. No conflict possible.
+```
+
+```sql
+-- Pessimistic Locking in SQL (SELECT ... FOR UPDATE)
+BEGIN TRANSACTION;
+
+-- Step 1: Lock the row while reading
+SELECT stock FROM Products WHERE ProductID = 101 FOR UPDATE;
+-- Row is now LOCKED — other transactions must wait
+
+-- Step 2: Check and update
+UPDATE Products SET stock = stock - 1 WHERE ProductID = 101;
+
+-- Step 3: Release the lock
+COMMIT;
+```
+
+```
+Best for:
+- Write-heavy systems (lots of concurrent writes)
+- High chance of conflicts (e.g., flash sales, ticket booking)
+- Critical data where you CAN'T afford a conflict
+```
+
+#### Optimistic vs Pessimistic — Comparison
+
+```
+┌──────────────────────┬──────────────────────────┬──────────────────────────┐
+│ Aspect               │ Optimistic Locking       │ Pessimistic Locking      │
+├──────────────────────┼──────────────────────────┼──────────────────────────┤
+│ Assumption           │ Conflicts are RARE       │ Conflicts WILL happen    │
+│ When it locks        │ Never locks — checks     │ Locks data immediately   │
+│                      │ version at write time    │ at read time (FOR UPDATE)│
+│ If conflict occurs   │ Transaction fails/retries│ Other users wait (block) │
+│ Performance          │ Fast reads (no locks)    │ Slower (users may wait)  │
+│ Risk                 │ Retries if conflict      │ Deadlocks if not careful │
+│ Best for             │ Read-heavy apps, low     │ Write-heavy apps, flash  │
+│                      │ contention               │ sales, booking systems   │
+└──────────────────────┴──────────────────────────┴──────────────────────────┘
+```
+
+```
+Real-world examples:
+- Git = Optimistic Locking
+  → Everyone edits freely, conflicts caught at merge time
+- ATM = Pessimistic Locking
+  → Account row locked during withdrawal so two ATMs can't overdraw
+- BookMyShow = Pessimistic Locking
+  → Seat locked when you start payment, others see "Filling Fast"
+- Google Docs = Optimistic (with real-time conflict resolution)
+```
+
 ### 🎤 How to Explain in an Interview
 
 > **Say this:** "A transaction is a group of operations treated as a single unit — they all succeed together or all fail together, using COMMIT to save and ROLLBACK to undo. When many transactions run at the same time, problems can happen like **dirty reads** (reading uncommitted data), **lost updates** (one update overwrites another), and **phantom reads** (new rows appear mid-transaction). To prevent these, databases use concurrency control methods like **locking**, **timestamp ordering**, and **MVCC**, where each user sees their own snapshot of the data."
 
-**Remember:** *Transaction = all-or-nothing unit; concurrency control (locks/timestamps/MVCC) keeps simultaneous transactions from corrupting data.*
+> **On Locking:** "There are two locking strategies. **Optimistic locking** assumes conflicts are rare — it lets everyone read freely but checks a version number before writing. If the version changed, the transaction fails and must retry. **Pessimistic locking** assumes conflicts will happen — it locks the row at read time using `SELECT ... FOR UPDATE`, so other users must wait. Optimistic is better for read-heavy apps with low conflicts; pessimistic is better for write-heavy scenarios like flash sales or ticket booking."
+
+**Remember:** *Optimistic = check version at write time (fail & retry on conflict). Pessimistic = lock at read time (others wait). Git is optimistic, ATM is pessimistic.*
 
 ---
 
@@ -1157,6 +1290,533 @@ Converts to Tables:
 
 ---
 
+## 14. Views
+
+A **View** is a **virtual table** based on the result of a SQL query. It doesn't store data itself — it just shows data from other tables.
+
+> **In simple terms:** A view is a saved query with a name. Every time you use it, it runs the query behind the scenes and shows you the latest result.
+
+### Why Use Views?
+
+```
+┌─────────────────────┬──────────────────────────────────────────────────┐
+│ Benefit             │ E-Commerce Example                               │
+├─────────────────────┼──────────────────────────────────────────────────┤
+│ Simplify queries    │ Instead of writing a 5-table JOIN every time,    │
+│                     │ save it as a view and just SELECT * FROM view    │
+│ Security            │ Show customer support only Name & OrderID,       │
+│                     │ hide payment details & passwords                 │
+│ Abstraction         │ App code uses a view; if table structure changes, │
+│                     │ just update the view — app code stays the same   │
+└─────────────────────┴──────────────────────────────────────────────────┘
+```
+
+### Creating & Using a View
+
+```sql
+-- Create a view: "Active Products" (only in-stock products)
+CREATE VIEW ActiveProducts AS
+SELECT ProductID, ProductName, Price, Stock
+FROM Products
+WHERE Stock > 0;
+
+-- Use it like a regular table
+SELECT * FROM ActiveProducts;
+SELECT * FROM ActiveProducts WHERE Price < 50000;
+
+-- Create a view: "Order Summary" (avoids complex JOIN every time)
+CREATE VIEW OrderSummary AS
+SELECT O.OrderID, U.Name AS Customer, P.ProductName, O.Amount, O.OrderDate
+FROM Orders O
+JOIN Users U ON O.UserID = U.UserID
+JOIN Products P ON O.ProductID = P.ProductID;
+
+-- Now anyone can run:
+SELECT * FROM OrderSummary WHERE Customer = 'Rahul';
+-- Instead of writing the 3-table JOIN every time!
+
+-- Drop a view
+DROP VIEW ActiveProducts;
+```
+
+### View vs Table
+
+```
+┌──────────────────┬─────────────────────────┬─────────────────────────┐
+│ Aspect           │ Table                   │ View                    │
+├──────────────────┼─────────────────────────┼─────────────────────────┤
+│ Stores data?     │ Yes (on disk)           │ No (runs query on use)  │
+│ Takes space?     │ Yes                     │ No (just a saved query) │
+│ Can INSERT into? │ Yes                     │ Sometimes (simple views)│
+│ Performance      │ Direct access           │ Re-runs query each time │
+│ Use case         │ Actual data storage     │ Simplify, secure, reuse │
+└──────────────────┴─────────────────────────┴─────────────────────────┘
+```
+
+### Materialized View
+
+A **Materialized View** actually **stores the result** on disk and refreshes periodically — giving you the speed of a table with the convenience of a view.
+
+```sql
+-- PostgreSQL example
+CREATE MATERIALIZED VIEW TopSellingProducts AS
+SELECT ProductID, ProductName, COUNT(*) AS TotalSold
+FROM OrderItems
+GROUP BY ProductID, ProductName
+ORDER BY TotalSold DESC
+LIMIT 10;
+
+-- Fast to query (pre-computed)
+SELECT * FROM TopSellingProducts;
+
+-- Refresh when needed
+REFRESH MATERIALIZED VIEW TopSellingProducts;
+```
+
+### 🎤 How to Explain in an Interview
+
+> **Say this:** "A view is a virtual table created from a saved SQL query. It doesn't store data — it fetches fresh results each time you use it. Views simplify complex queries, add security by hiding sensitive columns, and provide abstraction so the app doesn't need to know the underlying table structure. A **materialized view** is different — it actually stores the query result on disk for fast access and needs to be refreshed periodically."
+
+**One line:** *View = saved query (virtual table). Materialized view = cached query result (stored on disk, needs refresh).*
+
+---
+
+## 15. Stored Procedures
+
+A **Stored Procedure** is a **pre-written block of SQL** saved in the database that you can call by name — like a function in programming.
+
+> **In simple terms:** Instead of writing the same SQL steps again and again, save them as a procedure and just "call" it whenever needed.
+
+### Why Use Stored Procedures?
+
+```
+┌──────────────────────┬──────────────────────────────────────────────────┐
+│ Benefit              │ E-Commerce Example                               │
+├──────────────────────┼──────────────────────────────────────────────────┤
+│ Reusability          │ "Place Order" logic (deduct money, reduce stock, │
+│                      │ create order) — write once, call from anywhere   │
+│ Performance          │ Pre-compiled on the server — faster than sending │
+│                      │ multiple queries from the app                    │
+│ Security             │ App only calls procedure name, never touches     │
+│                      │ tables directly — prevents SQL injection         │
+│ Maintainability      │ Change business logic in ONE place (procedure),  │
+│                      │ not in 10 different app files                    │
+└──────────────────────┴──────────────────────────────────────────────────┘
+```
+
+### Creating & Using a Stored Procedure
+
+```sql
+-- Create a procedure: Place an Order
+CREATE PROCEDURE PlaceOrder(
+    IN p_UserID INT,
+    IN p_ProductID INT,
+    IN p_Quantity INT
+)
+BEGIN
+    DECLARE v_Price DECIMAL(10,2);
+    DECLARE v_Stock INT;
+
+    -- Step 1: Get product price and stock
+    SELECT Price, Stock INTO v_Price, v_Stock
+    FROM Products WHERE ProductID = p_ProductID;
+
+    -- Step 2: Check if enough stock
+    IF v_Stock < p_Quantity THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Out of Stock!';
+    END IF;
+
+    -- Step 3: Reduce stock
+    UPDATE Products
+    SET Stock = Stock - p_Quantity
+    WHERE ProductID = p_ProductID;
+
+    -- Step 4: Deduct from wallet
+    UPDATE Wallets
+    SET Balance = Balance - (v_Price * p_Quantity)
+    WHERE UserID = p_UserID;
+
+    -- Step 5: Create order
+    INSERT INTO Orders (UserID, ProductID, Amount, OrderDate)
+    VALUES (p_UserID, p_ProductID, v_Price * p_Quantity, NOW());
+END;
+
+-- Call the procedure (from app or SQL)
+CALL PlaceOrder(1, 101, 1);  -- User 1 buys 1 unit of Product 101
+```
+
+### Stored Procedure vs Function
+
+```
+┌──────────────────┬─────────────────────────┬─────────────────────────┐
+│ Aspect           │ Stored Procedure        │ Function                │
+├──────────────────┼─────────────────────────┼─────────────────────────┤
+│ Returns          │ Zero or more values     │ Exactly one value       │
+│ Can modify data? │ Yes (INSERT, UPDATE)    │ Usually No              │
+│ Called with      │ CALL PlaceOrder(...)    │ SELECT GetPrice(101)    │
+│ Used in SELECT?  │ No                      │ Yes                     │
+│ Use case         │ Multi-step operations   │ Calculations, lookups   │
+└──────────────────┴─────────────────────────┴─────────────────────────┘
+```
+
+### 🎤 How to Explain in an Interview
+
+> **Say this:** "A stored procedure is a saved block of SQL code stored inside the database that you can call by name, like a function. It's useful for encapsulating multi-step operations — like placing an order which involves checking stock, deducting money, and creating a record. Benefits include reusability (write once, call many times), better performance (pre-compiled on the server), and security (the app never directly touches tables, reducing SQL injection risk)."
+
+**One line:** *Stored procedure = a reusable SQL function stored in the database. Write the logic once, call it by name.*
+
+---
+
+## 16. Triggers
+
+A **Trigger** is a block of SQL that **automatically executes** when a specific event (INSERT, UPDATE, DELETE) happens on a table.
+
+> **In simple terms:** A trigger is like an alarm — when something happens to a table, it fires automatically. You don't call it; the database calls it for you.
+
+### Why Use Triggers?
+
+```
+┌──────────────────────┬──────────────────────────────────────────────────┐
+│ Benefit              │ E-Commerce Example                               │
+├──────────────────────┼──────────────────────────────────────────────────┤
+│ Automation           │ Auto-log every price change to an audit table    │
+│ Data Integrity       │ Prevent stock from going negative automatically  │
+│ Audit Trail          │ Record WHO changed WHAT and WHEN                 │
+│ Cascading Actions    │ When order is placed, auto-update sales stats    │
+└──────────────────────┴──────────────────────────────────────────────────┘
+```
+
+### Types of Triggers
+
+```
+┌───────────────────┬──────────────────────────────────────────────┐
+│ Type              │ When it Fires                                │
+├───────────────────┼──────────────────────────────────────────────┤
+│ BEFORE INSERT     │ Before a new row is added                    │
+│ AFTER INSERT      │ After a new row is added                     │
+│ BEFORE UPDATE     │ Before a row is modified                     │
+│ AFTER UPDATE      │ After a row is modified                      │
+│ BEFORE DELETE     │ Before a row is removed                      │
+│ AFTER DELETE      │ After a row is removed                       │
+└───────────────────┴──────────────────────────────────────────────┘
+```
+
+### Creating Triggers
+
+```sql
+-- Trigger 1: Log every price change to an audit table
+CREATE TRIGGER LogPriceChange
+AFTER UPDATE ON Products
+FOR EACH ROW
+BEGIN
+    IF OLD.Price != NEW.Price THEN
+        INSERT INTO PriceAudit (ProductID, OldPrice, NewPrice, ChangedAt)
+        VALUES (OLD.ProductID, OLD.Price, NEW.Price, NOW());
+    END IF;
+END;
+
+-- Now whenever someone runs:
+UPDATE Products SET Price = 74999 WHERE ProductID = 101;
+-- → Trigger AUTOMATICALLY logs: "ProductID 101: 79999 → 74999 at 2026-06-18"
+
+
+-- Trigger 2: Prevent stock from going negative
+CREATE TRIGGER PreventNegativeStock
+BEFORE UPDATE ON Products
+FOR EACH ROW
+BEGIN
+    IF NEW.Stock < 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Stock cannot be negative!';
+    END IF;
+END;
+
+-- Now if someone tries:
+UPDATE Products SET Stock = -1 WHERE ProductID = 101;
+-- → ERROR: "Stock cannot be negative!" — Update is BLOCKED!
+
+
+-- Trigger 3: Auto-update total sales count when new order is placed
+CREATE TRIGGER UpdateSalesCount
+AFTER INSERT ON Orders
+FOR EACH ROW
+BEGIN
+    UPDATE Products
+    SET TotalSold = TotalSold + 1
+    WHERE ProductID = NEW.ProductID;
+END;
+```
+
+### BEFORE vs AFTER Triggers
+
+```
+BEFORE trigger:
+  → Runs BEFORE the change is saved
+  → Can MODIFY or BLOCK the operation
+  → Use for: validation, setting default values
+
+AFTER trigger:
+  → Runs AFTER the change is saved
+  → Can't change the operation (already done)
+  → Use for: logging, notifications, cascading updates
+```
+
+### 🎤 How to Explain in an Interview
+
+> **Say this:** "A trigger is a block of SQL that automatically executes when a specific event — like INSERT, UPDATE, or DELETE — happens on a table. For example, when a product's price changes, a trigger can automatically log the old and new price to an audit table. Triggers can be BEFORE (to validate or block an action) or AFTER (to log or cascade changes). They're useful for enforcing business rules, maintaining audit trails, and automating tasks — but should be used carefully because they're invisible to the app and can make debugging harder."
+
+**One line:** *Trigger = automatic SQL that fires on table events. BEFORE = validate/block, AFTER = log/cascade.*
+
+---
+
+## 17. Sharding
+
+**Sharding** is splitting a large database into **smaller pieces (shards)** and distributing them across multiple servers.
+
+> **In simple terms:** When one database server can't handle all the data or traffic, break the data into chunks and put each chunk on a different server.
+
+### Why Shard?
+
+```
+Problem: ShopKart has 500 million orders in ONE table on ONE server.
+
+- Queries are SLOW (too much data to scan)
+- Server is overloaded (too many users hitting it at once)
+- Storage is full (one machine can't hold it all)
+- Single point of failure (server dies = everything goes down)
+
+Solution: SHARD the Orders table across multiple servers!
+
+Server 1 (Shard A): Orders from UserID 1 - 10,000,000
+Server 2 (Shard B): Orders from UserID 10,000,001 - 20,000,000
+Server 3 (Shard C): Orders from UserID 20,000,001 - 30,000,000
+...
+
+→ Each server handles only its portion = FAST!
+→ Load is distributed = no single overloaded server
+→ One shard crashes? Only some users affected, not ALL
+```
+
+### Types of Sharding
+
+#### Horizontal Sharding (Most Common)
+
+Split **rows** across servers. Each shard has the same table structure but different data.
+
+```
+Original Orders Table (500M rows on 1 server):
+┌─────────┬────────┬─────────────┬────────┐
+│ OrderID │ UserID │ Product     │ Amount │
+├─────────┼────────┼─────────────┼────────┤
+│ 1       │ 1      │ iPhone 15   │ 79999  │
+│ ...     │ ...    │ ...         │ ...    │
+│ 500M    │ 30M    │ Laptop      │ 55999  │
+└─────────┴────────┴─────────────┴────────┘
+
+After Horizontal Sharding (split by UserID range):
+
+  Shard 1 (Server A)         Shard 2 (Server B)         Shard 3 (Server C)
+  UserID: 1 - 10M            UserID: 10M - 20M          UserID: 20M - 30M
+  ┌─────────┬────────┐       ┌─────────┬────────┐       ┌─────────┬────────┐
+  │ OrderID │ UserID │       │ OrderID │ UserID │       │ OrderID │ UserID │
+  ├─────────┼────────┤       ├─────────┼────────┤       ├─────────┼────────┤
+  │ 1       │ 1      │       │ ...     │ 10M+1  │       │ ...     │ 20M+1  │
+  │ ...     │ ...    │       │ ...     │ ...    │       │ ...     │ ...    │
+  └─────────┴────────┘       └─────────┴────────┘       └─────────┴────────┘
+```
+
+#### Vertical Sharding
+
+Split **columns** across servers. Put frequently accessed columns on one server, rarely used on another.
+
+```
+Original Users Table:
+┌────────┬────────┬────────────┬─────────────────────────┬────────────┐
+│ UserID │ Name   │ Email      │ ProfilePicture (10MB)   │ Bio        │
+└────────┴────────┴────────────┴─────────────────────────┴────────────┘
+
+After Vertical Sharding:
+
+  Server A (Hot data - accessed often)    Server B (Cold data - rarely accessed)
+  ┌────────┬────────┬────────────┐        ┌────────┬─────────────────┬────────┐
+  │ UserID │ Name   │ Email      │        │ UserID │ ProfilePicture  │ Bio    │
+  └────────┴────────┴────────────┘        └────────┴─────────────────┴────────┘
+```
+
+### Sharding Strategies (Shard Key Selection)
+
+```
+┌────────────────────┬─────────────────────────────────────────────────────┐
+│ Strategy           │ E-Commerce Example                                  │
+├────────────────────┼─────────────────────────────────────────────────────┤
+│ Range-Based        │ UserID 1-10M → Shard 1, 10M-20M → Shard 2          │
+│                    │ Problem: uneven distribution (hotspots)             │
+│ Hash-Based         │ hash(UserID) % 3 → determines which shard (0,1,2)  │
+│                    │ Better distribution, but range queries are hard     │
+│ Geography-Based    │ India users → Shard India, US users → Shard US     │
+│                    │ Low latency for users (data is nearby)              │
+└────────────────────┴─────────────────────────────────────────────────────┘
+```
+
+### Sharding vs Replication
+
+```
+┌──────────────────┬──────────────────────────┬──────────────────────────┐
+│ Aspect           │ Sharding                 │ Replication              │
+├──────────────────┼──────────────────────────┼──────────────────────────┤
+│ What it does     │ Splits data across       │ Copies same data to      │
+│                  │ multiple servers         │ multiple servers         │
+│ Each server has  │ DIFFERENT data (a piece) │ SAME data (full copy)    │
+│ Solves           │ Storage & write scaling  │ Read scaling & failover  │
+│ Example          │ User 1-10M on Server A   │ Full DB on Server A & B  │
+│                  │ User 10M-20M on Server B │ Reads go to either one   │
+└──────────────────┴──────────────────────────┴──────────────────────────┘
+```
+
+### Challenges of Sharding
+
+```
+❌ Challenges:
+- Cross-shard queries are complex (JOINs across servers)
+- Resharding is painful (adding new shard = move data around)
+- No cross-shard transactions easily
+- Application must know which shard to query (routing logic)
+
+✅ When to Shard:
+- Single server can't handle the data volume
+- Read/write traffic exceeds one machine's capacity
+- You need geographic distribution
+- You've already tried indexing, caching, read replicas
+```
+
+### 🎤 How to Explain in an Interview
+
+> **Say this:** "Sharding is splitting a large database into smaller pieces called shards, with each shard living on a different server. For example, if we have 500 million orders, we can put users 1-10M on Server A, 10M-20M on Server B, and so on. This distributes load and storage, so no single server is overwhelmed. The main strategies are range-based, hash-based, and geography-based sharding. Sharding is different from replication — replication copies the same data everywhere for read scaling, while sharding splits different data across servers for write scaling and storage."
+
+**One line:** *Sharding = split data across servers (each has a piece). Replication = copy data to many servers (each has everything).*
+
+---
+
+## 18. CAP Theorem
+
+The **CAP Theorem** states that a distributed database system can only guarantee **two out of three** properties at the same time:
+
+- **C** – Consistency
+- **A** – Availability
+- **P** – Partition Tolerance
+
+> **In simple terms:** When your database is spread across multiple servers and a network issue occurs, you have to choose: do you want correct data (consistency) or do you want the system to keep working (availability)? You can't have both during a failure.
+
+### The Three Properties
+
+```
+┌───────────────────┬──────────────────────────────────────────────────────┐
+│ Property          │ Meaning (E-Commerce Example)                         │
+├───────────────────┼──────────────────────────────────────────────────────┤
+│ Consistency (C)   │ Every user sees the SAME data at the same time.      │
+│                   │ If iPhone stock changes to 0, ALL servers show 0     │
+│                   │ instantly. No stale data.                            │
+│                   │                                                      │
+│ Availability (A)  │ Every request gets a response (success or failure),  │
+│                   │ even if some servers are down. The system NEVER      │
+│                   │ refuses to answer.                                   │
+│                   │                                                      │
+│ Partition          │ The system continues to work even when network       │
+│ Tolerance (P)     │ communication between servers breaks. Servers can't  │
+│                   │ talk to each other, but each keeps running.          │
+└───────────────────┴──────────────────────────────────────────────────────┘
+```
+
+### Why Can't We Have All Three?
+
+```
+Scenario: ShopKart has 2 database servers (Server A & Server B).
+Network between them BREAKS (Partition happens!).
+
+User buys the last iPhone → Server A updates stock = 0
+But Server A can't tell Server B (network is broken!)
+User on Server B checks stock → what should happen?
+
+Option 1 — Choose CONSISTENCY (CP):
+  → Server B says: "Sorry, I can't answer — I might have stale data."
+  → System is UNAVAILABLE but data is always CORRECT.
+  → Example: Banking systems (can't show wrong balance)
+
+Option 2 — Choose AVAILABILITY (AP):
+  → Server B says: "Stock = 1" (stale data, but at least it responds)
+  → System is AVAILABLE but data might be INCONSISTENT.
+  → Example: Social media feed (showing slightly old posts is OK)
+
+You CANNOT have both consistency AND availability during a partition.
+That's the CAP trade-off!
+```
+
+### CAP Trade-offs in Real Systems
+
+```
+┌──────────┬─────────────────────────────────────────────────────────────┐
+│ Choice   │ Real-World Examples                                         │
+├──────────┼─────────────────────────────────────────────────────────────┤
+│ CP       │ MongoDB, Redis (single master), HBase, Bank databases       │
+│ (Consis- │ → Prefer correct data over always responding                │
+│ tency)   │ → If partition happens, some requests may be rejected       │
+│          │                                                             │
+│ AP       │ Cassandra, DynamoDB, CouchDB, DNS                           │
+│ (Avail-  │ → Prefer always responding, even with slightly old data     │
+│ ability) │ → If partition happens, might show stale data temporarily   │
+│          │                                                             │
+│ CA       │ Traditional single-server RDBMS (MySQL, PostgreSQL)          │
+│ (No      │ → Only possible when there's NO network partition            │
+│ Partition)│ → Not realistic for distributed systems                    │
+└──────────┴─────────────────────────────────────────────────────────────┘
+```
+
+### E-Commerce Example
+
+```
+ShopKart makes different CAP choices for different services:
+
+1. Payment Service → CP (Consistency + Partition Tolerance)
+   → We'd rather reject a payment than process a wrong amount
+   → "Sorry, payment system is temporarily unavailable" > wrong charge
+
+2. Product Catalog → AP (Availability + Partition Tolerance)
+   → Always show products, even if price is 2 seconds old
+   → Showing a slightly outdated price is better than showing nothing
+
+3. Shopping Cart → AP (Availability + Partition Tolerance)
+   → Always let users add items to cart
+   → Sync later when network recovers (eventual consistency)
+
+4. Inventory/Stock → CP (Consistency + Partition Tolerance)
+   → Stock must be accurate to prevent overselling
+   → Better to show "temporarily unavailable" than sell out-of-stock items
+```
+
+### Eventual Consistency
+
+```
+Many AP systems use "Eventual Consistency":
+
+→ Data might be temporarily inconsistent across servers
+→ But given enough time (usually milliseconds), ALL servers will sync up
+→ Eventually, everyone sees the same data
+
+Example: Instagram likes
+  → You like a post → your server shows 101 likes
+  → Your friend's server still shows 100 likes (for a few ms)
+  → After sync → both show 101 likes
+  → Users don't notice the brief inconsistency
+```
+
+### 🎤 How to Explain in an Interview
+
+> **Say this:** "The CAP theorem says that in a distributed database, you can only guarantee two out of three properties: **Consistency** (everyone sees the same data), **Availability** (system always responds), and **Partition Tolerance** (works even when network between servers breaks). Since network partitions are inevitable in distributed systems, the real choice is between **CP** (correct data, might refuse some requests) and **AP** (always responds, might show slightly stale data). Banks choose CP because wrong balances are unacceptable; social media chooses AP because showing old posts briefly is fine."
+
+**Remember:** *CAP = pick 2 of 3. Network breaks are inevitable, so the real choice is: correct data (CP) or always available (AP). Banks = CP, social media = AP.*
+
+---
+
 ## Quick Revision Cheat Sheet
 
 ```
@@ -1177,4 +1837,9 @@ ACID          → Atomicity, Consistency, Isolation, Durability
 Index         → Speed up product search by name/category
 Transaction   → Place order = deduct money + reduce stock + create order
 ER Diagram    → Visual design: User → Places → Order → Contains → Product
+View          → Virtual table from a saved query (no data stored)
+Stored Proc   → Saved SQL logic you call by name (like a function)
+Trigger       → Auto-fires SQL on INSERT/UPDATE/DELETE events
+Sharding      → Split data across servers for scale (each has a piece)
+CAP Theorem   → Pick 2 of 3: Consistency, Availability, Partition Tolerance
 ```
