@@ -20,6 +20,7 @@
    - [Process vs Thread](#process-vs-thread)
    - [Process Management Tasks](#process-management-tasks)
    - [CPU Scheduling](#cpu-scheduling)
+   - [Process Synchronization](#process-synchronization)
 7. [Memory Management](#memory-management)
 8. [File Systems](#file-systems)
 9. [Input/Output Management](#inputoutput-management)
@@ -441,5 +442,216 @@ CPU scheduling is the process by which the operating system decides which proces
 | **Multilevel Queue** | Both | Ready queue is divided into multiple queues (e.g., foreground, background), each with its own algorithm | Organizes processes by type/priority | No movement between queues; lower queues may starve |
 | **Multilevel Feedback Queue** | Both | Like multilevel queue, but processes can move between queues based on behavior and aging | Most flexible; adapts to process behavior | Complex to configure (number of queues, time quanta, promotion/demotion rules) |
 
-> **🎯 Interview Tip:** "CPU scheduling or Process scheduling determine which process gets the CPU for execution.
+> **🎯 Interview Tip:** "CPU scheduling decides which process in the ready queue gets the CPU. Key metrics are turnaround time (CT − AT), waiting time (TAT − BT), and response time. Preemptive scheduling allows the OS to interrupt a running process, while non-preemptive lets it finish or block. FCFS is simple but has the convoy effect. SJF gives minimum average waiting time but needs burst time prediction. Round Robin is fair with a fixed time quantum. Priority scheduling can cause starvation, solved by aging. Multilevel Feedback Queue is the most flexible — it adjusts process priority based on behavior and supports movement between queues."
 
+---
+
+### Process Synchronization
+
+Process Synchronization is a mechanism used to coordinate the execution of multiple processes that access shared resources. Its purpose is to ensure data consistency, prevent race conditions, and avoid deadlocks.
+
+**Types of Processes:**
+- **Independent Process:** Execution does not affect or get affected by other processes.
+- **Cooperative Process:** Execution can affect or be affected by other processes in the system.
+
+**Why Synchronization is Needed:**
+- **Preventing Race Conditions:** Ensures processes don’t access shared data simultaneously, avoiding inconsistent results.
+- **Mutual Exclusion:** Only one process can be in the critical section at a time.
+- **Process Coordination:** Lets processes wait for specific conditions (e.g., producer-consumer problem).
+- **Deadlock Prevention:** Avoids circular waits and indefinite blocking.
+- **Fairness:** Prevents starvation by giving all processes fair access to resources.
+
+**Types of Synchronization:**
+- **Competitive:** Processes compete for access to a shared resource. Lack of synchronization leads to inconsistency or data loss.
+- **Cooperative:** Processes depend on each other’s execution. Lack of synchronization leads to deadlock.
+
+---
+
+#### Critical Section Problem
+
+The **critical section** is a code segment where a process accesses shared resources. The problem is to design a protocol so that processes can cooperate without conflicts.
+
+**Requirements for a valid solution:**
+1. **Mutual Exclusion:** Only one process in the critical section at a time.
+2. **Progress:** If no process is in the critical section, a waiting process must be allowed to enter without indefinite delay.
+3. **Bounded Waiting:** A limit must exist on how many times other processes can enter before a waiting process gets its turn.
+
+---
+
+#### Solutions to Process Synchronization
+
+<table align="center" style="border-collapse: collapse; text-align: center;">
+  <tr>
+    <th>Category</th>
+    <th>Solution</th>
+    <th>Mechanism</th>
+  </tr>
+  <tr>
+    <td><b>1. Interrupt Disable</b></td>
+    <td>Disable interrupts</td>
+    <td>Prevent preemption during critical section</td>
+  </tr>
+  <tr><td colspan="3">⬇️</td></tr>
+  <tr>
+    <td rowspan="2"><b>2. Lock-Based</b></td>
+    <td>Software Locks</td>
+    <td>Peterson’s, Dekker’s, Bakery Algorithm</td>
+  </tr>
+  <tr>
+    <td>Hardware Locks</td>
+    <td>Test-and-Set, Compare-and-Swap, Spinlocks, Mutex</td>
+  </tr>
+  <tr><td colspan="3">⬇️</td></tr>
+  <tr>
+    <td rowspan="2"><b>3. OS-Based</b></td>
+    <td>Semaphores</td>
+    <td>wait() and signal() with blocking</td>
+  </tr>
+  <tr>
+    <td>Monitors</td>
+    <td>High-level construct with condition variables</td>
+  </tr>
+</table>
+
+<p align="center"><i>Evolution: Interrupt Disable → Locks (Software → Hardware) → OS-Based (Semaphores → Monitors)</i></p>
+
+---
+
+**1. Interrupt Disable**
+
+Disables all hardware interrupts before entering the critical section so the process cannot be preempted.
+
+- Works only on **uniprocessor** systems — disabling interrupts on one CPU doesn’t stop others.
+- Dangerous: if a process forgets to re-enable interrupts, the system hangs.
+- Gives too much power to user processes.
+- Rarely used in practice due to these limitations.
+
+---
+
+**2. Lock-Based Solutions**
+
+A process must **acquire** a lock before entering the critical section and **release** it after exiting.
+
+**(a) Software-Based Locks:**
+
+| Algorithm | Processes | How It Works |
+|---|---|---|
+| **Peterson’s** | 2 | Uses flag array + turn variable to alternate access |
+| **Dekker’s** | 2 | Earliest mutual exclusion algorithm; uses flags + turn |
+| **Bakery** | N | "Take-a-number" system — process with lowest number enters |
+
+- **Limitation:** Require busy waiting (CPU wastes cycles looping). Not suitable for modern multiprocessor systems.
+
+**(b) Hardware-Based Locks:**
+
+Modern CPUs provide **atomic instructions** — indivisible operations that complete without interruption:
+
+| Instruction | How It Works |
+|---|---|
+| **Test-and-Set (TSL)** | Reads old lock value and sets it to "locked" in one atomic step |
+| **Compare-and-Swap (CAS)** | Compares memory value with expected; if equal, swaps with new value atomically |
+| **Spinlock** | Built using TSL/CAS — process "spins" (busy waits) until lock is free |
+
+- **Limitation:** Still uses busy waiting; no fairness guarantee (starvation possible); only solves basic mutual exclusion.
+
+**(c) Mutex (Mutual Exclusion Lock):**
+
+A higher-level lock built on hardware primitives:
+- If the mutex is unavailable, the process is **blocked and put to sleep** (no busy waiting).
+- When the lock is released, a waiting process is woken up.
+- Provides fairness and is widely used in thread libraries (e.g., pthreads) and operating systems.
+
+---
+
+**3. OS-Based Solutions**
+
+**(a) Semaphores:**
+
+A semaphore is an integer variable accessed with two atomic operations:
+- **`wait()` (P operation):** Decrement the semaphore. If value < 0, block the calling process.
+- **`signal()` (V operation):** Increment the semaphore. If a process is waiting, wake it up.
+
+| Type | Value Range | Purpose |
+|---|---|---|
+| **Binary Semaphore** | 0 or 1 | Acts like a mutex (mutual exclusion) |
+| **Counting Semaphore** | 0 to N | Controls access to a resource with N instances |
+
+- Removes busy waiting by blocking processes when resources are unavailable.
+
+**(b) Monitors:**
+
+A monitor is a high-level synchronization construct that combines mutual exclusion with condition variables:
+- Only **one process** can execute inside a monitor at a time (automatic mutual exclusion).
+- **Condition variables** (`wait`, `signal`) allow processes to wait for specific conditions and be woken up when conditions are met.
+- Safer and easier to use than semaphores — reduces chance of programming errors.
+
+---
+
+#### Synchronization Solutions Comparison
+
+| Solution | Busy Waiting | Multiprocessor | Fairness | Complexity |
+|---|---|---|---|---|
+| **Interrupt Disable** | No | ❌ (uniprocessor only) | No | Low |
+| **Software Locks** | Yes | ❌ (not practical) | Limited | Medium |
+| **Hardware Locks (Spinlock)** | Yes | ✅ | No | Low |
+| **Mutex** | No (blocks) | ✅ | Yes | Medium |
+| **Semaphore** | No (blocks) | ✅ | Yes | Medium |
+| **Monitor** | No (blocks) | ✅ | Yes | High (but safest) |
+
+> **🎯 Interview Tip:** "Process synchronization prevents race conditions when multiple processes access shared resources. The critical section problem requires mutual exclusion, progress, and bounded waiting. Solutions evolved from interrupt disabling (uniprocessor only) → software locks like Peterson’s (busy waiting, 2 processes) → hardware atomic instructions like Test-and-Set and CAS (fast, multiprocessor, but still busy waiting) → Mutex (blocks instead of spinning) → Semaphores (wait/signal with blocking, binary or counting) → Monitors (highest-level, automatic mutual exclusion with condition variables). Semaphores and monitors are the standard OS-level solutions used in practice."
+---
+
+#### Common IPC Problems
+
+| Problem | Description |
+|---|---|
+| **Race Condition** | Multiple processes update shared data simultaneously, leading to unpredictable results |
+| **Critical Section Problem** | Shared resource accessed by more than one process at a time |
+| **Producer-Consumer** | Buffer becomes full (producer waits) or empty (consumer waits) |
+| **Deadlock** | Processes wait forever for each other in a circular dependency |
+| **Starvation** | A process never gets the resource it needs |
+| **Lost Message** | Sent message never reaches the receiver |
+| **Ordering Problem** | Messages arrive in the wrong sequence |
+---
+
+#### Quick Summary: Evolution of Synchronization Solutions
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    PROCESS SYNCHRONIZATION                          │
+│                    (Preventing Race Conditions)                     │
+└─────────────────────────────────────────────────────────────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        ▼                       ▼                       ▼
+┌───────────────┐      ┌───────────────┐      ┌───────────────┐
+│ 1. INTERRUPT  │      │   2. LOCKS    │      │  3. OS-BASED  │
+│    DISABLE    │      │               │      │               │
+└───────────────┘      └───────────────┘      └───────────────┘
+        │                       │                       │
+        ▼               ┌───────┴───────┐       ┌───────┴───────┐
+   Uniprocessor         ▼               ▼       ▼               ▼
+   only (rarely     Software       Hardware  Semaphores     Monitors
+   used)            Locks          Locks
+                        │               │
+                        ▼               ▼
+                   Peterson's      Test-and-Set
+                   Dekker's        Compare-Swap
+                   Bakery          Spinlock
+                                   Mutex
+```
+
+| Stage | Solution | Key Point |
+|---|---|---|
+| **1** | Interrupt Disable | Stops preemption — only works on single CPU, dangerous |
+| **2a** | Software Locks | Peterson's, Bakery — busy waiting, not for multiprocessor |
+| **2b** | Hardware Locks | TSL, CAS, Spinlock — atomic, fast, but still busy waiting |
+| **2c** | Mutex | Blocks instead of spinning — no CPU waste |
+| **3a** | Semaphores | `wait()`/`signal()` — blocking, binary or counting |
+| **3b** | Monitors | Highest-level — automatic mutual exclusion + condition variables |
+
+**In short:** Solutions evolved from simple (interrupt disable) → locks (software → hardware → mutex) → OS-level (semaphores → monitors), with each step solving the limitations of the previous one. Modern systems use **mutexes**, **semaphores**, and **monitors**.
+
+## Multithreading 
+
+Multithreading is a mechanism that enables concurrency. It can achieve true parallelism when the system has multiple CPU cores.
