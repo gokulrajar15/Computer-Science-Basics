@@ -25,12 +25,6 @@
    - [Registers and Addressing](#registers-and-addressing)
    - [Swapping](#swapping)
    - [Types of Memory Allocation](#types-of-memory-allocation)
-     - [Contiguous Memory Allocation](#1-contiguous-memory-allocation)
-     - [Non-Contiguous Memory Allocation](#2-non-contiguous-memory-allocation)
-   - [Page Replacement Algorithms](#page-replacement-algorithms)
-   - [Virtual Memory](#virtual-memory)
-   - [Thrashing](#thrashing)
-   - [Overlay](#overlay)
 8. [File Systems](#file-systems)
 9. [Input/Output Management](#inputoutput-management)
 ---
@@ -1090,16 +1084,17 @@ In an operating system that uses paging, a page replacement algorithm is needed 
 
 The virtual memory manager performs this by:
 
-Selecting a victim page using a page replacement algorithm.
-Marking its page table entry as “not present.”
-If the page was modified (dirty), writing it back to disk before replacement.
-The efficiency of a page replacement algorithm directly affects the page fault rate, which in turn impacts system performance.
+- Selecting a victim page using a page replacement algorithm.
+- Marking its page table entry as “not present.”
+- If the page was modified (dirty), writing it back to disk before replacement.
+- The efficiency of a page replacement algorithm directly affects the page fault rate, which in turn impacts system performance.
 
-Common Page Replacement Techniques
-First In First Out (FIFO)
-Optimal Page replacement
-Least Recently Used (LRU)
-Most Recently Used (MRU)
+Common Page Replacement Techniques:
+
+- **First In First Out (FIFO)**
+- **Optimal Page Replacement**
+- **Least Recently Used (LRU)**
+- **Most Recently Used (MRU)**
 
 ### Virtual Memory
 
