@@ -73,7 +73,7 @@ Computer network is a collection of interconnected devices that communicate with
 
 ## OSI Model
 
-The OSI Model is a conceptual framework created by the International Organization for Standardization (ISO) to describe how data is transmitted across a network using a structured seven-layer architecture.
+The OSI(Open Systems Interconnection) Model is a conceptual framework created by the International Organization for Standardization (ISO) to describe how data is transmitted across a network using a structured seven-layer architecture.
 
 <table align="center" style="border-collapse: collapse; text-align: center;">
   <tr>

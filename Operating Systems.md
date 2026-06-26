@@ -396,7 +396,7 @@ Process management is a key part in operating systems with multi-programming or 
 
 ### CPU Scheduling
 
-CPU scheduling is the process by which the operating system decides which process in the ready queue gets to use the CPU at a particular time. Since a CPU can only execute one task at a time, scheduling ensures efficient utilization when multiple processes compete for the processor.
+CPU scheduling is the process the operating system decides which process in the ready queue gets to use the CPU at a particular time. Since a CPU can only execute one task at a time, scheduling ensures efficient utilization when multiple processes compete for the processor.
 
 **Goals of CPU Scheduling:**
 - Maximize CPU utilization (keep the CPU as busy as possible).

@@ -509,27 +509,83 @@ Users:                   Products:                Orders:
 
 ### 7.3 Third Normal Form (3NF)
 
-**Rule:** Must be in 2NF + **No transitive dependency** (non-key column should not depend on another non-key column).
+**Third Normal Form (3NF)** is a database normalization rule used to reduce data redundancy and prevent update anomalies. A table is in **3NF** if:
 
-```
-❌ Violates 3NF:
-┌─────────┬────────┬────────────┬──────────────┐
-│ OrderID │ UserID │ CityID     │ CityName     │
-├─────────┼────────┼────────────┼──────────────┤
-│ 501     │ 1      │ C1         │ Mumbai       │
-└─────────┴────────┴────────────┴──────────────┘
-- CityName depends on CityID (not on OrderID) → Transitive Dependency!
-- OrderID → CityID → CityName
+1. It is already in **Second Normal Form (2NF)**.
+2. It has **no transitive dependencies**—that is, no non-key attribute depends on another non-key attribute.
 
-✅ In 3NF: Split into two tables
+#### Simple Definition
 
-Orders:                              Cities:
-┌─────────┬────────┬────────┐       ┌────────┬──────────┐
-│ OrderID │ UserID │ CityID │       │ CityID │ CityName │
-├─────────┼────────┼────────┤       ├────────┼──────────┤
-│ 501     │ 1      │ C1     │       │ C1     │ Mumbai   │
-└─────────┴────────┴────────┘       └────────┴──────────┘
-```
+In 3NF:
+
+- Every non-key attribute should depend **only on the primary key**, **the whole primary key**, and **nothing but the primary key**.
+
+---
+
+#### Example (Not in 3NF)
+
+Consider this table:
+
+| StudentID | StudentName | DepartmentID | DepartmentName |
+|-----------|-------------|--------------|----------------|
+| 101       | Alice       | D01          | Computer Science |
+| 102       | Bob         | D02          | Mechanical     |
+| 103       | Charlie     | D01          | Computer Science |
+
+##### Functional Dependencies
+
+- StudentID → StudentName, DepartmentID
+- DepartmentID → DepartmentName
+
+Here:
+
+- **DepartmentName** depends on **DepartmentID**, not directly on **StudentID**.
+- This is a **transitive dependency**:
+  - StudentID → DepartmentID
+  - DepartmentID → DepartmentName
+
+So the table is **not in 3NF**.
+
+---
+
+#### Convert to 3NF
+
+Split the table into two tables.
+
+##### Students
+
+| StudentID | StudentName | DepartmentID |
+|-----------|-------------|--------------|
+| 101       | Alice       | D01          |
+| 102       | Bob         | D02          |
+| 103       | Charlie     | D01          |
+
+##### Departments
+
+| DepartmentID | DepartmentName |
+|--------------|----------------|
+| D01          | Computer Science |
+| D02          | Mechanical     |
+
+Now:
+
+- Student information depends only on **StudentID**.
+- Department information depends only on **DepartmentID**.
+- There are **no transitive dependencies**.
+
+This satisfies **3NF**.
+
+---
+
+#### Why 3NF is Important
+
+It helps to:
+
+- Eliminate redundant data.
+- Avoid update anomalies (changing a department name in multiple rows).
+- Prevent insertion anomalies (adding a department without a student).
+- Prevent deletion anomalies (losing department information when the last student is deleted).
+- Improve data consistency and integrity.
 
 ### 7.4 BCNF (Boyce-Codd Normal Form)
 
